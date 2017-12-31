@@ -1,0 +1,369 @@
+Public Class LFsim
+    '    Global variables shared by program objects that need to respond to
+    '    different button click events on Form1
+    Dim lf(200) As Integer  'length-frequency histogram - each element is a frequency bucket
+    Dim yr(100, 3, 30) As Single 'annual events
+    'yr(i,,)=year index variable
+    'yr(0,,)=contains starting year eg 1954
+    'yr(,1,)=fishing effort that year
+    'yr(,2,)=natural mortality that year (proportion of individuals dying as result of nonfishing)
+    'yr(,3,)=recruitment that year 
+    'yr(,,k)=ageclass-specific fishing effort, natural mortality
+    Dim fish(1000000, 2) As Single 'individual fish parameters
+    'fish(i,1)=k
+    'fish(i,2)=Linf
+    Dim maxl As Single      'number of bars in histogram
+    Dim ageclasses As Integer = 14 'total number of generations
+    Dim smoothtag As Integer 'flag to set smoothing on if histo run once
+    Dim mortality, selectivity, kmean, kfact, lmean, lfact, samplemonth, phase As Single
+    Dim popsize, total As Integer
+    'M(,0) is total Z, M(,1) is Natural Mortality M, M(,2) is Fishing Mortality F
+    Dim M(ageclasses, 2) As Single 'matrix to hold annual mortality estimates
+ 
+    Private Sub bigpop(ByVal fish(), ByVal yr())
+        Dim yearcounter, fishcounter As Integer
+        For yearcounter = 1 To 100
+            For fishcounter = 1 To 1000000
+
+            Next fishcounter
+        Next yearcounter
+    End Sub
+
+    Private Sub Button1_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) _
+    Handles Button1.Click
+
+        'set wait cursor on
+        Dim storedcursorstate As Cursor
+        storedcursorstate = Cursor
+        Cursor = Cursors.WaitCursor
+
+        'get input parameters from form1
+        '==============================
+        'annual natural mortality
+        'note that m is of size (ageclasses,2)
+        M(1, 1) = m1.Value
+        M(2, 1) = m2.Value
+        M(3, 1) = m3.Value
+        M(4, 1) = m4.Value
+        M(5, 1) = m5.Value
+        M(6, 1) = m6.Value
+        M(7, 1) = m7.Value
+        M(8, 1) = m8.Value
+        M(9, 1) = m9.Value
+        M(10, 1) = m10.Value
+        M(11, 1) = m11.Value
+        M(12, 1) = m12.Value
+        M(13, 1) = m13.Value
+        M(14, 1) = m14.Value
+        'now F
+        M(1, 2) = f1.Value
+        M(2, 2) = f2.Value
+        M(3, 2) = f3.Value
+        M(4, 2) = f4.Value
+        M(5, 2) = f5.Value
+        M(6, 2) = f6.Value
+        M(7, 2) = f7.Value
+        M(8, 2) = f8.Value
+        M(9, 2) = f9.Value
+        M(10, 2) = f10.Value
+        M(11, 2) = f11.Value
+        M(12, 2) = f12.Value
+        M(13, 2) = f13.Value
+        M(14, 2) = f14.Value
+        'Was formerly single mortality_input.Value
+        'total mortality applied equally to all age
+        'classes as survival rate = 1/EXP(Z.t).
+        '(same as  EXP(-Z.t))
+        'Use 0 for zero deaths, 1 for total extinction
+        Dim i As Integer
+        For i = 1 To ageclasses
+            M(i, 0) = M(i, 1) + M(i, 2)
+            'If M(i, 0) > 1.0 Then M(i, 2) = 1.0 - M(i, 1)
+        Next i
+        '==============================
+        '
+        selectivity = selectivity_input.Value
+        'total selection applied equally to all age
+        'classes as sampling prob = 1/EXP(S.(tmax-t))
+        '(has opposite effect to Z, exponentially
+        'thinning younger ages). 0 for zero selection
+        '->1 for total selection (none at all caught)
+        kmean = kmeaninput.Value 'mean value for K to vary round
+        kfact = kfactinput.Value 'standard dev of K variation
+        lmean = lmeaninput.Value 'mean value for Linf to vary round
+        lfact = lfactinput.Value 'Standard dev of Linf variation
+        samplemonth = 12 - samplemonthinput.Value
+        'sample taken how many months after yearly
+        'point-spawning time (0-12)? 1 introduces
+        'a larval class to histogram! Note: this is
+        'mathematically equivalent to Tnought
+        maxl = Int(lmean + lfact * 5)
+        'max length estimated (array needs to hold Lmean + variation)
+        popsize = popsizeinput.Value
+        'basic yearly population size, or "starting
+        'population": subject to mortality, of course.
+        '
+        'ageclasses = 20 'ageclassesinput.Value
+        'number of periods of growth to include
+        'now fixed at 14 
+        '
+        'declare working arrays
+        'Dim fish(popsize, 2) As Single
+        'each element of the array is a "fish"
+        'subscript 1 is K in VB growth equation
+        'subscript 2 is Linf in VB growth equation
+        ReDim lf(maxl)
+        'holds length-frequency histogram data
+        'Note that simulation only goes up to 100 length
+        'units, so keep Linf below, say, 90.
+        Dim aggregate As Integer = 1 'histogram class interval
+        phase = samplemonth / 12
+
+        smoothtag = 0
+        generate_growth(fish, kfact, kmean, lfact, lmean, popsize)
+        generate_population(ageclasses, popsize, fish, lf, phase, maxl, selectivity, mortality, total)
+        histo(lf, maxl)
+
+        drawlogo()
+
+        Cursor = storedcursorstate 'set waitcursor off
+        If Button2.Enabled = False Then Button2.Enabled = True 'make smoothing possible
+    End Sub
+
+    Private Sub drawlogo()
+        '--------draw logo
+        Dim drawFormat1 As New StringFormat()
+        Using formGraphics As Graphics = PictureBox2.CreateGraphics(), _
+            drawFont As New System.Drawing.Font("Garamond", 20), _
+            drawBrush As New SolidBrush(Color.SlateGray)
+            '
+            formGraphics.RotateTransform(90.0)
+            formGraphics.DrawString("Nauru Fisheries 2010", _
+            drawFont, drawBrush, 135.0, -30.0, drawFormat1)
+        End Using
+    End Sub
+
+    Private Sub Button2_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) _
+    Handles Button2.Click
+        smoothit(lf, maxl)
+        histo(lf, maxl)
+    End Sub
+    Private Sub smoothit(ByVal lf, ByVal maxl)
+        'called from Button2 click to put running average through
+        'existing histogram data stored in lf() after running "build population" cycle
+
+        Dim i, runningav, j, dividend, maxval As Integer
+        maxval = CInt(maxl) 'I think this needs to be made an integer for following integer calcs
+        Dim lftemp(maxl) As Integer
+        runningav = 2
+        For i = 1 + runningav To maxval - runningav
+            dividend = 0
+            For j = i - runningav To i + runningav
+                If j > 0 And j <= maxval Then
+                    lftemp(i) = lftemp(i) + lf(j)
+                    dividend = dividend + 1
+                End If
+            Next
+            lf(i) = CInt(Int(CShort(lftemp(i)) / CShort(dividend) + 0.5))
+        Next
+    End Sub
+    Private Sub generate_growth(ByVal fish, ByVal kfact, ByVal kmean, ByVal lfact, _
+    ByVal lmean, ByVal popsize)
+        ' generates a snapshot population of fish with VB growth parameters with 
+        'stochastic variation around input means according to input standard deviation
+        'Dim updown As Single   'randomly decides whether to add or subtract variation from each mean
+        Dim i As Integer
+        For i = 1 To popsize
+            'updown = -Int(Rnd() + 0.5) * 2 + 1               'K dev + or - ?
+            'fish(i, 1) = kmean
+            'fish(i, 1) = (fish(i, 1)) + (updown * (kfact * Math.Sqrt(-Math.Log(Rnd))))  'gaussian deviation from mean K
+            fish(i, 1) = kmean - kfact * Math.Sqrt(-Math.Log(Rnd)) + kfact / 2
+            'updown = -Int(Rnd() + 0.5) * 2 + 1              'Linf dev + or - ?
+            'fish(i, 2) = lmean
+            'fish(i, 2) = (fish(i, 2)) + (updown * (lfact * Math.Sqrt(-Math.Log(Rnd))))    'gaussian deviation from mean Linf
+            fish(i, 2) = lmean - lfact * Math.Sqrt(-Math.Log(Rnd)) + lfact / 2
+        Next i
+    End Sub
+
+    Private Sub generate_population(ByVal ageclasses, ByVal popsize, ByVal fish, ByVal lf, _
+    ByVal phase, ByVal maxl, ByVal selectivity, ByVal mortality, ByVal total)
+        '*** calculate size at age for each fish i% at each age ***
+        Dim age, i, length As Integer
+        Dim k, linfinity, survivalrate, survival, selectionrate As Single
+        survivalrate = 1.0
+        For age = 1 To ageclasses
+            survivalrate = survivalrate * (1.0 - M(age, 0))
+            selectionrate = 1 / (Math.Exp(selectivity * (ageclasses - age)))
+            For i = 1 To popsize
+                'count = count + 1
+                ' apply VB to generate length at that age
+                k = fish(i, 1)                             'make it easier to read
+                linfinity = fish(i, 2)                     'following equation
+                length = Int(linfinity * (1 - Math.Exp(-k * (age - phase))) + 0.5)
+                '
+                'increment appropriate histogram class (provided that the fish-length
+                'generated is within bounds of histogram, to avoid program crash)
+                If length < maxl And length > 0 Then
+                    'count that fish only if it escapes the "survival factors"
+                    'was "survivalrate = 1 / (Math.Exp(mortality * age))" for total M
+                    If Rnd() < survivalrate Then           'NOTE - this is random, but
+                        If Rnd() < selectionrate Then        'weighted according to Z or S
+                            lf(length) = lf(length) + 1  ' exponentially. Fewer young &
+                            total = total + 1              'older fish survive. (RND is
+                        End If                             'random no between 0 and 1)
+                    End If
+                End If
+            Next i
+        Next age
+    End Sub
+
+    Private Sub histo(ByVal lf, ByVal nclasses)
+        ' draws a histogram using the length-frequency 1-D matrix "lf(nclasses)"
+        'Initialise the histo object
+        Dim lastclass, n, nmax, i, x As Integer
+        Dim barhite, barwidth, xsize, ysize, xx, yy, xshift, yraise, kludge As Single
+        xsize = CSng(PictureBox1.Width)
+        ysize = CSng(PictureBox1.Height)
+        xshift = xsize / 20.0 'amount of space to leave on left. 
+        yraise = ysize / 10.0 'amount to raise graph off "floor".
+        n = 0         'counter to hold total number of individuals in population at end of run
+        nmax = 0      'counter to hold largest length class for scaling Y axis
+        lastclass = 0 'counter to hold length class of largest fish for scaling X axis
+        For i = 1 To nclasses
+            n = n + lf(i)                     'find total number individuals
+            If lf(i) > nmax Then nmax = lf(i) 'find largest length-class
+            If lf(i) > 0 Then lastclass = i 'find last non-zero class
+        Next
+        If smoothtag > 0 Then lastclass = smoothtag Else smoothtag = lastclass
+        '(if smoothing, keep same x-axis scale)
+        'If lastclass = 0 Then
+        'TextBox1.Text = "FAIL"
+        'Exit Sub
+        'End If
+
+        kludge = CSng(lastclass) 'necessary to convert scalefactor to real number, otherwise interval becomes integer
+        barwidth = (xsize - xshift) / (kludge * 1.1)
+        kludge = CSng(nmax)
+        barhite = (ysize - yraise) / (kludge * 1.1)
+
+        '** draw histogram bars
+        Using redBrush As New SolidBrush(Color.Black), whiteBrush As New SolidBrush(Color.White), _
+        redPen As New Pen(Color.Black), formGraphics As Graphics = PictureBox1.CreateGraphics(), _
+        drawFont As New System.Drawing.Font("Arial", 10), blueBrush As New SolidBrush(Color.Blue)
+            formGraphics.FillRectangle(whiteBrush, New Rectangle(0, 0, xsize, ysize)) 'clear box to white
+            formGraphics.DrawRectangle(redPen, New Rectangle(0, 0, xsize - 1, ysize - 1)) 'put frame on box
+            For x = 1 To lastclass
+                If lf(x) > 0 Then
+                    xx = (CSng(x) * barwidth) - barwidth + xshift
+                    yy = (CSng(lf(x)) * barhite)
+                    formGraphics.FillRectangle(blueBrush, New Rectangle(xx, ysize - yy - yraise, barwidth, yy))
+                    'alternative which puts alternate colours in bars
+                    'For y = 1 To lf(x)
+                    'yy = ysize - ((y * barhite) + yraise) ' 
+                    'If Int(y / 2) = y / 2 Then
+                    'formGraphics.FillRectangle(redBrush, New Rectangle(xx, yy, barwidth, barhite))
+                    'Else : formGraphics.FillRectangle(blueBrush, New Rectangle(xx, yy, barwidth, barhite))
+                    'End If
+                    'Next y
+                End If
+            Next x
+        End Using
+
+
+        '** draw axes
+        Dim drawFormat As New StringFormat(), w As Integer
+        Using redBrush As New SolidBrush(Color.Black), redPen As New Pen(Color.Black), _
+        formGraphics As Graphics = PictureBox1.CreateGraphics(), _
+        drawFont As New System.Drawing.Font("Arial", 6)
+            formGraphics.DrawLine(redPen, xshift, ysize - yraise, barwidth * lastclass, ysize - yraise)
+            formGraphics.DrawLine(redPen, xshift, ysize - yraise, xshift, yraise)
+            formGraphics.DrawString("Population size=" & CStr(n), drawFont, redBrush, xshift + 5, yraise / 2.5)
+            For x = 5 To lastclass - 1 Step 5
+                xx = (x * barwidth) - barwidth + xshift
+                If x / 5 = Int(x / 5) Then w = 10 Else w = 4
+                formGraphics.DrawLine(redPen, xx, ysize - (yraise), xx, ysize - (yraise + w))
+                formGraphics.DrawString(CStr(x), drawFont, redBrush, xx - barwidth, ysize - yraise)
+            Next x
+            'formGraphics.DrawString(CStr(nmax), drawFont, redBrush, 3, ysize - yraise - (nmax * barhite))
+            'now unused - label for top of Y axis - size of largest class
+        End Using
+    End Sub
+
+    Private Sub PictureBox1_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles PictureBox1.Click, MyBase.Activated
+        ' handles refreshing histogram when focus lost
+        If maxl > 0 Then histo(lf, maxl)
+        drawlogo()
+
+    End Sub
+
+  
+    ' Menu UI interaction event handler
+    Private Sub exclusiveCheck(ByVal parent As ToolStripDropDownButton, ByVal menuItem As ToolStripMenuItem)
+        ' Species parameters are exclusive.
+        ' Uncheck sibling menu items and check current one
+        For Each item As ToolStripItem In parent.DropDownItems
+            If item.GetType() Is GetType(ToolStripMenuItem) Then
+                CType(item, ToolStripMenuItem).Checked = False
+            End If
+        Next
+        menuItem.Checked = True
+    End Sub
+
+    Private Sub borderStyleToolStripMenuItem_Click(ByVal sender As Object, ByVal e As EventArgs) _
+    Handles SkipjackToolStripMenuItem.Click, YellowfinToolStripMenuItem.Click, BigeyeToolStripMenuItem.Click, AlbacoreToolStripMenuItem.Click
+        Dim styleSelected As ToolStripMenuItem = CType(sender, ToolStripMenuItem)
+        exclusiveCheck(parameterpresetmenu, styleSelected)
+
+        ' Set default parameters for several species to be accessed from menu
+        'SKJ, YFT, BET K and Linf from Hampton 2001
+        Select Case styleSelected.Text
+            Case "Skipjack"
+                'mortality_input.Value = 0.5
+                selectivity_input.Value = 0
+                kmeaninput.Value = 1.3
+                kfactinput.Value = 0.065
+                lmeaninput.Value = 65.1
+                lfactinput.Value = 0.58
+                'samplemonthinput.Value = 12
+                popsizeinput.Value = 1000
+                'ageclassesinput.Value = 20
+                Exit Select
+            Case "Yellowfin"
+                'mortality_input.Value = 0.3
+                selectivity_input.Value = 0
+                kmeaninput.Value = 0.25
+                kfactinput.Value = 0.031
+                lmeaninput.Value = 166.4
+                lfactinput.Value = 13.5
+                'samplemonthinput.Value = 12
+                popsizeinput.Value = 500
+                'ageclassesinput.Value = 20
+                Exit Select
+            Case "Bigeye"
+                'mortality_input.Value = 0.15
+                selectivity_input.Value = 0
+                kmeaninput.Value = 0.251
+                kfactinput.Value = 0.028
+                lmeaninput.Value = 181.7
+                lfactinput.Value = 6.88
+                'samplemonthinput.Value = 12
+                popsizeinput.Value = 500
+                'ageclassesinput.Value = 20
+                Exit Select
+            Case "Albacore"
+                'mortality_input.Value = 0.15
+                selectivity_input.Value = 0
+                kmeaninput.Value = 0.2
+                kfactinput.Value = 0.05
+                lmeaninput.Value = 100
+                lfactinput.Value = 10
+                'samplemonthinput.Value = 12
+                popsizeinput.Value = 500
+                'ageclassesinput.Value = 20
+                Exit Select
+        End Select
+    End Sub
+
+    
+End Class
+
